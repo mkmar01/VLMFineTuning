@@ -311,9 +311,9 @@ def generate_qa_pairs(info_path: str, view_index: int, img_width: int = 150, img
             )
             # Front or behind
             if kart_y < center_y:
-                fb_position = "in front of"
+                fb_position = "front"
             else:
-                fb_position = "behind"
+                fb_position = "back"
             qa_pairs.append(
                 {
                     "question": f"Is {kart['kart_name']} in front of or behind the ego car?",
