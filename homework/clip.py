@@ -3,6 +3,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision as tv
 from peft import LoraConfig, TaskType, get_peft_model
 from PIL import Image
@@ -101,8 +102,18 @@ class CLIP(nn.Module):
         super().__init__()
         self.vision_encoder = vision_encoder
         self.text_encoder = text_encoder
-        # TODO: implement the rest components
-        raise NotImplementedError("Not implemented")
+        vision_hidden_size = getattr(self.vision_encoder.config, "hidden_size", None) or getattr(
+            self.vision_encoder.config, "embed_dim"
+        )
+        text_hidden_size = getattr(self.text_encoder.config, "hidden_size", None) or getattr(
+            self.text_encoder.config, "embed_dim"
+        )
+        if vision_hidden_size is None or text_hidden_size is None:
+            raise ValueError("Unable to infer hidden dimensions for projection layers.")
+
+        self.vision_projection = nn.Linear(vision_hidden_size, proj_dim, bias=False)
+        self.text_projection = nn.Linear(text_hidden_size, proj_dim, bias=False)
+        self.logit_scale = nn.Parameter(torch.tensor(1.0 / temperature).log())
 
     def encode_image(self, image: torch.Tensor) -> torch.Tensor:
         return self.vision_encoder(image)
@@ -180,7 +191,29 @@ class CLIP(nn.Module):
         Returns:
             TODO: think about the what values should be returned
         """
-        raise NotImplementedError("Not implemented")
+        vision_outputs = self.vision_encoder(pixel_values=pixel_values, return_dict=True)
+        if getattr(vision_outputs, "pooler_output", None) is not None:
+            vision_embeds = vision_outputs.pooler_output
+        else:
+            vision_embeds = vision_outputs.last_hidden_state[:, 0]
+        vision_features = F.normalize(self.vision_projection(vision_embeds), dim=-1)
+
+        text_outputs = self.text_encoder(
+            input_ids=input_ids, attention_mask=attention_mask, use_cache=False, return_dict=True
+        )
+        text_hidden = text_outputs.last_hidden_state
+        if attention_mask is not None:
+            last_token_index = attention_mask.long().sum(dim=-1) - 1
+        else:
+            last_token_index = torch.full((text_hidden.shape[0],), text_hidden.shape[1] - 1, device=text_hidden.device)
+        last_token_index = last_token_index.clamp(min=0)
+        batch_indices = torch.arange(text_hidden.shape[0], device=text_hidden.device)
+        text_embeds = text_hidden[batch_indices, last_token_index]
+        text_features = F.normalize(self.text_projection(text_embeds), dim=-1)
+
+        logit_scale = self.logit_scale.exp()
+
+        return vision_features, text_features, logit_scale
 
 
 def compute_clip_loss(
@@ -199,7 +232,12 @@ def compute_clip_loss(
     Returns:
         The loss for the CLIP model.
     """
-    raise NotImplementedError("Not implemented")
+    vision_features, text_features, logit_scale = outputs
+    logits_per_image = logit_scale * vision_features @ text_features.T
+    logits_per_text = logits_per_image.T
+    targets = torch.arange(vision_features.size(0), device=vision_features.device)
+    loss = (F.cross_entropy(logits_per_image, targets) + F.cross_entropy(logits_per_text, targets)) * 0.5
+    return loss
 
 
 def get_target_modules_for_lora(model: nn.Module) -> list[str]:
@@ -354,7 +392,7 @@ def test(ckpt_path: str, val_dataset: str = "valid_grader"):
 def main():
     from fire import Fire
 
-    Fire({"train": train, "test": test})
+    Fire({"train": train, "test": test, "demo_train": demo_train})
 
 
 if __name__ == "__main__":

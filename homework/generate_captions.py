@@ -3,26 +3,64 @@ from pathlib import Path
 import fire
 from matplotlib import pyplot as plt
 
-from .generate_qa import draw_detections, extract_frame_info
+from generate_qa import draw_detections, extract_frame_info, extract_kart_objects, extract_track_info
 
 
 def generate_caption(info_path: str, view_index: int, img_width: int = 150, img_height: int = 100) -> list:
     """
     Generate caption for a specific view.
     """
-    # 1. Ego car
-    # {kart_name} is the ego car.
+    kart_objects = extract_kart_objects(info_path, view_index, img_width, img_height)
+    track_name = extract_track_info(info_path)
 
-    # 2. Counting
-    # There are {num_karts} karts in the scenario.
+    if not kart_objects:
+        return [f"The track is {track_name}.", "There are 0 karts in the scene."]
 
-    # 3. Track name
-    # The track is {track_name}.
+    center_kart = next((kart for kart in kart_objects if kart.get("is_center_kart")), None)
 
-    # 4. Relative position
-    # {kart_name} is {position} of the ego car.
+    captions: list[str] = []
 
-    raise NotImplementedError("Not implemented")
+    if center_kart:
+        captions.append(f"{center_kart['kart_name']} is the ego car.")
+
+    num_karts = len(kart_objects)
+    captions.append(f"There are {num_karts} karts in the scene.")
+
+    captions.append(f"The track is {track_name}.")
+
+    if center_kart and num_karts > 1:
+        center_x, center_y = center_kart["center"]
+        horizontal_threshold = max(2.0, img_width * 0.02)
+        vertical_threshold = max(2.0, img_height * 0.02)
+
+        for kart in kart_objects:
+            if kart["is_center_kart"]:
+                continue
+
+            kart_x, kart_y = kart["center"]
+
+            lr_phrase = None
+            if kart_x < center_x - horizontal_threshold:
+                lr_phrase = "left of"
+            elif kart_x > center_x + horizontal_threshold:
+                lr_phrase = "right of"
+
+            fb_phrase = None
+            if kart_y < center_y - vertical_threshold:
+                fb_phrase = "in front of"
+            elif kart_y > center_y + vertical_threshold:
+                fb_phrase = "behind"
+
+            if lr_phrase:
+                captions.append(f"{kart['kart_name']} is {lr_phrase} the ego car.")
+            if fb_phrase:
+                captions.append(f"{kart['kart_name']} is {fb_phrase} the ego car.")
+            # if lr_phrase and fb_phrase:
+            #     captions.append(f"{kart['kart_name']} is {fb_phrase} and {lr_phrase} the ego car.")
+            # if not lr_phrase and not fb_phrase:
+            #     captions.append(f"{kart['kart_name']} is near the ego car.")
+
+    return captions
 
 
 def check_caption(info_file: str, view_index: int):
