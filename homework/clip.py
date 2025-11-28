@@ -97,7 +97,7 @@ class CaptionDatasetForTraining(Dataset):
 
 class CLIP(nn.Module):
     def __init__(
-        self, vision_encoder: nn.Module, text_encoder: nn.Module, proj_dim: int = 64, temperature: float = 0.07
+        self, vision_encoder: nn.Module, text_encoder: nn.Module, proj_dim: int = 512, temperature: float = 0.07
     ):
         super().__init__()
         self.vision_encoder = vision_encoder
@@ -114,6 +114,8 @@ class CLIP(nn.Module):
         self.vision_projection = nn.Linear(vision_hidden_size, proj_dim, bias=False)
         self.text_projection = nn.Linear(text_hidden_size, proj_dim, bias=False)
         self.logit_scale = nn.Parameter(torch.tensor(1.0 / temperature).log())
+        self._logit_scale_min = torch.log(torch.tensor(1e-2))
+        self._logit_scale_max = torch.log(torch.tensor(100.0))
 
     def encode_image(self, image: torch.Tensor) -> torch.Tensor:
         return self.vision_encoder(image)
@@ -211,7 +213,7 @@ class CLIP(nn.Module):
         text_embeds = text_hidden[batch_indices, last_token_index]
         text_features = F.normalize(self.text_projection(text_embeds), dim=-1)
 
-        logit_scale = self.logit_scale.exp()
+        logit_scale = self.logit_scale.clamp(self._logit_scale_min, self._logit_scale_max).exp()
 
         return vision_features, text_features, logit_scale
 
@@ -256,8 +258,8 @@ def get_target_modules_for_lora(model: nn.Module) -> list[str]:
 
 def train(
     data_dir: Path | None = None,
-    output_dir: str = "clip",
-    num_train_epochs: float = 0.05,  # for debugging purpose, increase this once the dry run works
+    output_dir: str = "clip_model",
+    num_train_epochs: float = 3,  # for debugging purpose, increase this once the dry run works
     per_device_train_batch_size: int = 1024,
     gradient_accumulation_steps: int = 1,
     learning_rate: float = 5e-4,
