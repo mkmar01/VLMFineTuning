@@ -114,8 +114,8 @@ class CLIP(nn.Module):
         self.vision_projection = nn.Linear(vision_hidden_size, proj_dim, bias=False)
         self.text_projection = nn.Linear(text_hidden_size, proj_dim, bias=False)
         self.logit_scale = nn.Parameter(torch.tensor(1.0 / temperature).log())
-        self._logit_scale_min = torch.log(torch.tensor(1e-2))
-        self._logit_scale_max = torch.log(torch.tensor(100.0))
+        self.register_buffer("_logit_scale_min", torch.log(torch.tensor(1e-2)), persistent=False)
+        self.register_buffer("_logit_scale_max", torch.log(torch.tensor(100.0)), persistent=False)
 
     def encode_image(self, image: torch.Tensor) -> torch.Tensor:
         return self.vision_encoder(image)
