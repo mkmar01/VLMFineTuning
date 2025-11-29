@@ -2,8 +2,32 @@ import argparse
 import zipfile
 from pathlib import Path
 
-BLACKLIST = ["__pycache__", ".pyc", ".ipynb"]
+BLACKLIST = ["__pycache__", ".pyc", ".ipynb", "checkpoint-", "tensorboard", "events.out.tfevents"]
 MAXSIZE_MB = 40
+
+# Only keep the minimal checkpoint artifacts that the grader expects.
+# Directory name -> set of allowed filenames anywhere inside that directory.
+CHECKPOINT_WHITELIST = {
+    "clip_model": {"adapter_config.json", "adapter_model.safetensors", "additional_weights.pt"},
+    "vlm_model": {"adapter_config.json", "adapter_model.safetensors"},
+}
+
+
+def should_include(path: Path) -> bool:
+    path_str = str(path)
+    if any(b in path_str for b in BLACKLIST):
+        return False
+
+    for checkpoint_dir, allowed_files in CHECKPOINT_WHITELIST.items():
+        if checkpoint_dir in path.parts:
+            if path.is_dir():
+                # Skip nested checkpoint directories like checkpoint-XXXX entirely
+                if any(part.startswith("checkpoint-") for part in path.parts):
+                    return False
+                return True
+            return path.name in allowed_files
+
+    return True
 
 
 def bundle(homework_dir: str, utid: str):
@@ -17,7 +41,7 @@ def bundle(homework_dir: str, utid: str):
     files = []
 
     for f in homework_dir.rglob("*"):
-        if all(b not in str(f) for b in BLACKLIST):
+        if should_include(f):
             files.append(f)
 
     print("\n".join(str(f.relative_to(homework_dir)) for f in files))
